@@ -1,0 +1,57 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /recipes/{recipeId} {
+      // The caller's own like document for this recipe. It is written empty, so
+      // its existence is the entire record of the like.
+      function likeDoc() {
+        return /databases/$(database)/documents/users/$(request.auth.uid)/likes/$(recipeId);
+      }
+
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.likeCount == 0
+        && request.resource.data.title is string
+        && request.resource.data.cuisine is string
+        && request.resource.data.ingredients is list
+        && request.resource.data.instructions is list
+        && request.resource.data.createdAt is timestamp
+        && request.resource.data.keys().hasAll(
+          ['title', 'cuisine', 'ingredients', 'instructions', 'createdAt', 'createdBy', 'likeCount'])
+        && request.resource.data.keys().hasOnly(
+          ['title', 'cuisine', 'ingredients', 'instructions', 'createdAt', 'createdBy', 'likeCount']);
+      // Only the like counter may change after creation, by exactly one, and only
+      // in the same commit that adds or removes the caller's own like document.
+      allow update: if request.auth != null
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['likeCount'])
+        && request.resource.data.likeCount is int
+        && request.resource.data.likeCount >= 0
+        && (
+          (request.resource.data.likeCount == resource.data.likeCount + 1
+            && !exists(likeDoc()) && existsAfter(likeDoc()))
+          ||
+          (request.resource.data.likeCount == resource.data.likeCount - 1
+            && exists(likeDoc()) && !existsAfter(likeDoc()))
+        );
+      allow delete: if request.auth != null
+        && request.auth.uid == resource.data.createdBy;
+    }
+    match /users/{userId}/likes/{recipeId} {
+      function recipeDoc() {
+        return /databases/$(database)/documents/recipes/$(recipeId);
+      }
+      function isOwner() {
+        return request.auth != null && request.auth.uid == userId;
+      }
+
+      allow read: if isOwner();
+      // A like document only ever appears or disappears together with the
+      // matching move of that recipe's counter.
+      allow create: if isOwner()
+        && getAfter(recipeDoc()).data.likeCount == get(recipeDoc()).data.likeCount + 1;
+      allow delete: if isOwner()
+        && getAfter(recipeDoc()).data.likeCount == get(recipeDoc()).data.likeCount - 1;
+    }
+  }
+}
