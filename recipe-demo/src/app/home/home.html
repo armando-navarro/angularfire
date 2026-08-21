@@ -1,0 +1,66 @@
+<main class="container">
+  <h1>Recipes</h1>
+
+  <search class="filters" aria-label="Filter and sort recipes">
+    <label>
+      Cuisine
+      <select #cuisineSelect (change)="recipeStore.cuisine.set(cuisineSelect.value)">
+        <option value="all" [selected]="recipeStore.cuisine() === 'all'">All cuisines</option>
+        @for (cuisine of cuisines; track cuisine) {
+          <option [value]="cuisine" [selected]="recipeStore.cuisine() === cuisine">
+            {{ cuisine }}
+          </option>
+        }
+      </select>
+    </label>
+
+    <label>
+      Sort
+      <select #sortSelect (change)="recipeStore.setSort(sortSelect.value)">
+        <option value="newest" [selected]="recipeStore.sort() === 'newest'">Newest</option>
+        <option value="title" [selected]="recipeStore.sort() === 'title'">A-Z</option>
+      </select>
+    </label>
+  </search>
+
+  <p role="alert">
+    @if (recipeStore.error()) {
+      Recipes could not be loaded.
+    }
+  </p>
+
+  <div class="recipes" role="list">
+    @for (recipe of recipeStore.recipes(); track recipe.id) {
+      <div role="listitem">
+        <header>
+          <hgroup>
+            <p>{{ recipe.cuisine }}</p>
+            <h2>{{ recipe.title }}</h2>
+          </hgroup>
+        </header>
+
+        <details>
+          <summary>Ingredients and steps</summary>
+          <ul>
+            @for (ingredient of recipe.ingredients; track ingredient) {
+              <li>{{ ingredient }}</li>
+            }
+          </ul>
+          <ol>
+            @for (step of recipe.instructions; track step) {
+              <li>{{ step }}</li>
+            }
+          </ol>
+        </details>
+
+        <footer>
+          <button class="outline" disabled>Like ({{ recipe.likeCount }})</button>
+        </footer>
+      </div>
+    }
+  </div>
+
+  @if (recipeStore.recipes().length === 0 && !recipeStore.error()) {
+    <p>No recipes yet.</p>
+  }
+</main>
