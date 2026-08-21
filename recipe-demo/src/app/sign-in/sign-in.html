@@ -1,0 +1,44 @@
+<main class="container">
+  <h1>Sign in</h1>
+
+  @let email = credentials.controls.email;
+  @let password = credentials.controls.password;
+  @let emailInvalid = email.touched && email.invalid;
+  @let passwordInvalid = password.touched && password.invalid;
+
+  <form [formGroup]="credentials" (ngSubmit)="signIn()">
+    <label>
+      Email
+      <input
+        type="email"
+        formControlName="email"
+        autocomplete="email"
+        aria-describedby="email-error"
+        [attr.aria-invalid]="emailInvalid ? true : null"
+      />
+    </label>
+    <small id="email-error" role="alert">
+      @if (emailInvalid) {
+        Enter a valid email address.
+      }
+    </small>
+    <label>
+      Password
+      <input
+        type="password"
+        formControlName="password"
+        autocomplete="current-password"
+        aria-describedby="password-error"
+        [attr.aria-invalid]="passwordInvalid ? true : null"
+      />
+    </label>
+    <small id="password-error" role="alert">
+      @if (passwordInvalid) {
+        Enter your password.
+      }
+    </small>
+    <p role="alert">{{ error() }}</p>
+    <button type="submit">Sign in</button>
+    <button type="button" class="secondary" (click)="createAccount()">Create account</button>
+  </form>
+</main>

@@ -1,0 +1,24 @@
+main {
+  max-width: 22rem;
+}
+
+form button {
+  width: 100%;
+}
+
+[role='alert']:empty {
+  margin: 0;
+}
+
+label:has(+ small[role='alert']:not(:empty)) {
+  margin-bottom: 0;
+}
+
+label:has(+ small[role='alert']:not(:empty)) input {
+  margin-bottom: calc(var(--pico-spacing) * 0.25);
+}
+
+small[role='alert']:not(:empty) {
+  display: block;
+  margin-bottom: var(--pico-spacing);
+}
