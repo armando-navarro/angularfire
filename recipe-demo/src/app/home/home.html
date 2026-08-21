@@ -26,6 +26,8 @@
   <p role="alert">
     @if (recipeStore.error()) {
       Recipes could not be loaded.
+    } @else if (recipeStore.likeErrorRecipe()) {
+      Your like for {{ recipeStore.likeErrorRecipe() }} could not be saved. Please try again.
     }
   </p>
 
@@ -54,7 +56,15 @@
         </details>
 
         <footer>
-          <button class="outline" disabled>Like ({{ recipe.likeCount }})</button>
+          <button
+            aria-label="Like"
+            [class.outline]="!recipeStore.likedIds().has(recipe.id)"
+            [disabled]="!recipeStore.canLike() || recipeStore.likePending().has(recipe.id)"
+            [attr.aria-pressed]="recipeStore.likedIds().has(recipe.id)"
+            (click)="recipeStore.toggleLike(recipe)"
+          >
+            Like ({{ recipe.likeCount }})
+          </button>
         </footer>
       </div>
     }

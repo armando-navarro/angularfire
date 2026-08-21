@@ -14,14 +14,18 @@ import {
 import {
   Query,
   collection,
+  doc,
   getDocs,
+  increment,
   limit,
   onSnapshot,
   orderBy,
   query,
   where,
+  writeBatch,
 } from 'firebase/firestore';
 
+import { AuthStore } from './auth-store';
 import { FIRESTORE } from './firebase-tokens';
 import { Recipe, recipeConverter } from './recipe-converter';
 
@@ -40,7 +44,10 @@ export class RecipeStore {
     'serverRenderedRecipes',
   );
 
+  private static readonly NO_LIKES: ReadonlySet<string> = new Set();
+
   private readonly firestore = inject(FIRESTORE);
+  private readonly authStore = inject(AuthStore);
   private readonly transferState = inject(TransferState);
   private readonly isBrowser = isPlatformBrowser(inject(PLATFORM_ID));
 
@@ -73,8 +80,71 @@ export class RecipeStore {
   });
   readonly error = this.recipeResource.error;
 
+  // Idle the resource with undefined so no snapshot subscription occurs on the server.
+  // null instead at sign-out, so Angular aborts the previous load and unsubscribes.
+  private readonly likedResource = resource({
+    params: () => (this.isBrowser ? (this.authStore.currentUser()?.uid ?? null) : undefined),
+    stream: ({ params: uid, abortSignal }) => this.readLikedIds(uid, abortSignal),
+    defaultValue: RecipeStore.NO_LIKES,
+  });
+
+  /** Recipes this visitor has liked. Reading the resource value directly would throw if the
+   * listener were ever denied, so a failed listener reads as nothing liked. */
+  readonly likedIds = computed(() =>
+    this.likedResource.hasValue() ? this.likedResource.value() : RecipeStore.NO_LIKES,
+  );
+
+  /** Recipes with a like write in flight, so a second click cannot count twice. */
+  readonly likePending = signal<ReadonlySet<string>>(RecipeStore.NO_LIKES);
+
+  /** Title of the recipe whose like write was rejected, or null. */
+  readonly likeErrorRecipe = signal<string | null>(null);
+
+  /** true once this user's first likes snapshot has arrived. */
+  private readonly likesReady = signal(false);
+
+  /** false until the signed-in user's likes have arrived. */
+  readonly canLike = computed(() => this.authStore.currentUser() !== null && this.likesReady());
+
   setSort(value: string): void {
     this.sort.set(value === 'title' ? 'title' : 'newest');
+  }
+
+  /** Adds or removes this user's like document and moves the recipe's likeCount in one batch, so
+   * a like never lands without its count. */
+  async toggleLike(recipe: Recipe): Promise<void> {
+    const user = this.authStore.currentUser();
+    // The button is disabled while a write is in flight. This repeats the check because a
+    // keyboard repeat or a replayed event can still arrive, and a second batch would count twice.
+    if (!user || !this.likesReady() || this.likePending().has(recipe.id)) {
+      return;
+    }
+    this.likePending.update(pending => new Set(pending).add(recipe.id));
+    this.likeErrorRecipe.set(null);
+    try {
+      const likeRef = doc(this.firestore, `users/${user.uid}/likes/${recipe.id}`);
+      const recipeRef = doc(this.firestore, `recipes/${recipe.id}`);
+      const batch = writeBatch(this.firestore);
+      if (this.likedIds().has(recipe.id)) {
+        batch.delete(likeRef);
+        if (recipe.likeCount > 0) {
+          batch.update(recipeRef, { likeCount: increment(-1) });
+        }
+      } else {
+        batch.set(likeRef, {});
+        batch.update(recipeRef, { likeCount: increment(1) });
+      }
+      await batch.commit();
+    } catch (error) {
+      console.error(error);
+      this.likeErrorRecipe.set(recipe.title);
+    } finally {
+      this.likePending.update(pending => {
+        const stillPending = new Set(pending);
+        stillPending.delete(recipe.id);
+        return stillPending;
+      });
+    }
   }
 
   /** Loads the recipes for one cuisine and sort order and hands back the signal
@@ -116,6 +186,30 @@ export class RecipeStore {
     );
     abortSignal.addEventListener('abort', unsubscribe);
     return recipes;
+  }
+
+  /** Streams the ids this user has liked. The abort signal unsubscribes the listener. */
+  private async readLikedIds(
+    uid: string | null,
+    abortSignal: AbortSignal,
+  ): Promise<Signal<ResourceStreamItem<ReadonlySet<string>>>> {
+    this.likesReady.set(false);
+    const likedIds = signal<ResourceStreamItem<ReadonlySet<string>>>({
+      value: RecipeStore.NO_LIKES,
+    });
+    if (uid === null) {
+      return likedIds;
+    }
+    const unsubscribe = onSnapshot(
+      collection(this.firestore, `users/${uid}/likes`),
+      snapshot => {
+        likedIds.set({ value: new Set(snapshot.docs.map(likeDoc => likeDoc.id)) });
+        this.likesReady.set(true);
+      },
+      error => likedIds.set({ error }),
+    );
+    abortSignal.addEventListener('abort', unsubscribe);
+    return likedIds;
   }
 
   // A production list would add cursor pagination on top of this limit.
