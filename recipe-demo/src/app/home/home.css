@@ -66,11 +66,47 @@
   margin-bottom: 0;
 }
 
-.recipes footer {
+.recipes > div > footer {
+  display: flex;
+  gap: calc(var(--pico-spacing) * 0.5);
   margin-top: auto;
 }
 
-.recipes footer button {
+.recipes dialog[open] {
+  display: block;
+  width: auto;
+  min-width: 0;
+  max-width: min(700px, calc(100vw - var(--pico-spacing) * 2));
+  height: fit-content;
+  min-height: 0;
+  max-height: calc(100vh - var(--pico-spacing) * 2);
+  margin: auto;
+  padding: var(--pico-block-spacing-vertical) var(--pico-block-spacing-horizontal);
+  overflow: auto;
+  border-radius: var(--pico-border-radius);
+  background: var(--pico-card-background-color);
+  box-shadow: var(--pico-card-box-shadow);
+  backdrop-filter: none;
+}
+
+.recipes dialog::backdrop {
+  backdrop-filter: var(--pico-modal-overlay-backdrop-filter);
+  background-color: var(--pico-modal-overlay-background-color);
+}
+
+.recipes dialog > form {
+  display: flex;
+  justify-content: flex-end;
+  gap: calc(var(--pico-spacing) * 0.5);
+  margin: var(--pico-block-spacing-vertical) calc(var(--pico-block-spacing-horizontal) * -1)
+    calc(var(--pico-block-spacing-vertical) * -1);
+  padding: calc(var(--pico-block-spacing-vertical) * 0.66) var(--pico-block-spacing-horizontal);
+  border-top: var(--pico-border-width) solid var(--pico-card-border-color);
+  border-radius: 0 0 var(--pico-border-radius) var(--pico-border-radius);
+  background-color: var(--pico-card-sectioning-background-color);
+}
+
+.recipes > div > footer button {
   width: auto;
   padding: 0.4rem 0.9rem;
   font-size: 0.8rem;

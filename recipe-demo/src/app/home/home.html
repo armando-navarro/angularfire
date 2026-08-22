@@ -28,6 +28,8 @@
       Recipes could not be loaded.
     } @else if (recipeStore.likeErrorRecipe()) {
       Your like for {{ recipeStore.likeErrorRecipe() }} could not be saved. Please try again.
+    } @else if (recipeStore.deleteErrorRecipe()) {
+      {{ recipeStore.deleteErrorRecipe() }} could not be deleted. Please try again.
     }
   </p>
 
@@ -65,6 +67,25 @@
           >
             Like ({{ recipe.likeCount }})
           </button>
+
+          @if (recipe.createdBy === authStore.currentUser()?.uid) {
+            <button
+              class="secondary outline"
+              [attr.aria-label]="'Delete ' + recipe.title"
+              (click)="confirmDelete.showModal()"
+            >
+              Delete
+            </button>
+
+            <dialog #confirmDelete [attr.aria-labelledby]="'confirm-delete-' + recipe.id">
+              <h3 [id]="'confirm-delete-' + recipe.id">Delete {{ recipe.title }}?</h3>
+              <p>This removes the recipe for everyone. It cannot be undone.</p>
+              <form method="dialog">
+                <button class="secondary">Cancel</button>
+                <button (click)="recipeStore.deleteRecipe(recipe)">Delete</button>
+              </form>
+            </dialog>
+          }
         </footer>
       </div>
     }

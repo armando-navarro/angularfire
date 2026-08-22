@@ -14,6 +14,7 @@ import {
 import {
   Query,
   collection,
+  deleteDoc,
   doc,
   getDocs,
   increment,
@@ -100,6 +101,9 @@ export class RecipeStore {
   /** Title of the recipe whose like write was rejected, or null. */
   readonly likeErrorRecipe = signal<string | null>(null);
 
+  /** Title of the recipe whose delete was rejected, or null. */
+  readonly deleteErrorRecipe = signal<string | null>(null);
+
   /** true once this user's first likes snapshot has arrived. */
   private readonly likesReady = signal(false);
 
@@ -121,6 +125,7 @@ export class RecipeStore {
     }
     this.likePending.update(pending => new Set(pending).add(recipe.id));
     this.likeErrorRecipe.set(null);
+    this.deleteErrorRecipe.set(null);
     try {
       const likeRef = doc(this.firestore, `users/${user.uid}/likes/${recipe.id}`);
       const recipeRef = doc(this.firestore, `recipes/${recipe.id}`);
@@ -144,6 +149,19 @@ export class RecipeStore {
         stillPending.delete(recipe.id);
         return stillPending;
       });
+    }
+  }
+
+  /** Removes a recipe the signed-in user created. Other users' like documents aren't cleaned
+   * up. Clearing those needs a Cloud Functions trigger, which this demo leaves out. */
+  async deleteRecipe(recipe: Recipe): Promise<void> {
+    this.deleteErrorRecipe.set(null);
+    this.likeErrorRecipe.set(null);
+    try {
+      await deleteDoc(doc(this.firestore, `recipes/${recipe.id}`));
+    } catch (error) {
+      console.error(error);
+      this.deleteErrorRecipe.set(recipe.title);
     }
   }
 
