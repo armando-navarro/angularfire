@@ -1,0 +1,4 @@
+# Firebase App Hosting backend settings.
+# See https://firebase.google.com/docs/app-hosting/configure
+runConfig:
+  minInstances: 0

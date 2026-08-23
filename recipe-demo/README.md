@@ -12,7 +12,7 @@ This is not a starter template and not production-ready. Known gaps are listed u
 
 ## Deployed instance
 
-Pending. The URL goes here once the app is deployed to Firebase App Hosting.
+<https://raw-sdk--recipe-demo-97859.us-central1.hosted.app>
 
 ## Design decisions
 
@@ -117,7 +117,7 @@ npm run serve:ssr:recipe-demo
 
 ### Reviewer note, please read before reporting a failure
 
-**Browse via `localhost`, not `127.0.0.1`.** Two separate things break on the numeric address. The built server rejects it outright with `HTTP 400`, because `angular.json` allows only the `localhost` host. And the app sets its App Check debug flag only when `location.hostname` is exactly `localhost`, so on any other host name you would hit real reCAPTCHA rather than a debug token.
+**Browse via `localhost`, not `127.0.0.1`.** Two separate things break on the numeric address. The built server rejects it outright with `HTTP 400`, because `angular.json` does not list it among the allowed hosts. And the app sets its App Check debug flag only when `location.hostname` is exactly `localhost`, so on any other host name you would hit real reCAPTCHA rather than a debug token.
 
 **A fresh machine or a fresh browser profile mints a new App Check debug token.** On the first load from `localhost` the console logs one line:
 

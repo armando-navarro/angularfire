@@ -59,7 +59,11 @@
             "outputMode": "server",
             "security": {
               "allowedHosts": [
-                "localhost"
+                "localhost",
+                "raw-sdk--recipe-demo-97859.us-central1.hosted.app",
+                "raw-sdk--recipe-demo-97859.web.app",
+                "raw-sdk--recipe-demo-97859.firebaseapp.com",
+                "raw-sdk-241663837838.us-central1.run.app"
               ]
             },
             "ssr": {
