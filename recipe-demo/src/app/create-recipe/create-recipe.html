@@ -1,0 +1,8 @@
+<main class="container">
+  <h1>Create a recipe</h1>
+  <p>One click. Firebase AI Logic invents a recipe and adds it to the public list.</p>
+  <p role="alert">{{ error() }}</p>
+  <button (click)="generate()" [attr.aria-busy]="busy()" [disabled]="busy()">
+    {{ busy() ? 'Generating' : 'Generate recipe' }}
+  </button>
+</main>

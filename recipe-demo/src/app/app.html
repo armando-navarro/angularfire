@@ -4,6 +4,9 @@
       <li>
         <strong><a routerLink="/">Recipe Demo</a></strong>
       </li>
+      @if (!onSignInPage()) {
+        <li><a routerLink="/create-recipe">Create recipe</a></li>
+      }
     </ul>
     <ul>
       @if (authStore.currentUser(); as user) {

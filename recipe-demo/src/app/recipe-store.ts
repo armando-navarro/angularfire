@@ -11,8 +11,10 @@ import {
   resource,
   signal,
 } from '@angular/core';
+import { Schema, getGenerativeModel } from 'firebase/ai';
 import {
   Query,
+  addDoc,
   collection,
   deleteDoc,
   doc,
@@ -22,13 +24,21 @@ import {
   onSnapshot,
   orderBy,
   query,
+  serverTimestamp,
   where,
   writeBatch,
 } from 'firebase/firestore';
 
 import { AuthStore } from './auth-store';
-import { FIRESTORE } from './firebase-tokens';
-import { Recipe, recipeConverter } from './recipe-converter';
+import { FIREBASE_AI, FIRESTORE } from './firebase-tokens';
+import {
+  CUISINES,
+  Recipe,
+  RecipeDraft,
+  recipeConverter,
+  recipeDraftConverter,
+  toRecipe,
+} from './recipe-converter';
 
 export type RecipeSort = 'newest' | 'title';
 
@@ -47,6 +57,18 @@ export class RecipeStore {
 
   private static readonly NO_LIKES: ReadonlySet<string> = new Set();
 
+  private static readonly RECIPE_SCHEMA = Schema.object({
+    properties: {
+      title: Schema.string(),
+      cuisine: Schema.enumString({ enum: [...CUISINES] }),
+      ingredients: Schema.array({ items: Schema.string() }),
+      instructions: Schema.array({ items: Schema.string() }),
+    },
+  });
+
+  // Only the browser config provides this, so generation is unavailable during server rendering.
+  private readonly ai = inject(FIREBASE_AI, { optional: true });
+
   private readonly firestore = inject(FIRESTORE);
   private readonly authStore = inject(AuthStore);
   private readonly transferState = inject(TransferState);
@@ -59,11 +81,20 @@ export class RecipeStore {
     this.transferState.get(RecipeStore.SERVER_RENDERED_RECIPES, null),
   );
 
+  private readonly listWanted = signal(false);
+
+  // Idle until a page asks for the list. The store is root provided and /create-recipe injects it
+  // only to generate, so without this its server render would wait on a read it never displays.
   private readonly recipeResource = resource({
-    params: () => ({ cuisine: this.cuisine(), sort: this.sort() }),
+    params: () => (this.listWanted() ? { cuisine: this.cuisine(), sort: this.sort() } : undefined),
     stream: ({ params, abortSignal }) => this.readRecipes(params.cuisine, params.sort, abortSignal),
     defaultValue: [],
   });
+
+  /** Starts the recipe list. Called by the pages that display it. */
+  watchRecipes(): void {
+    this.listWanted.set(true);
+  }
 
   // On the first browser render the resource has not loaded, so without this an empty list would
   // paint over the recipes the server already rendered. The query must match too, or a filter
@@ -112,6 +143,65 @@ export class RecipeStore {
 
   setSort(value: string): void {
     this.sort.set(value === 'title' ? 'title' : 'newest');
+  }
+
+  /** Asks Firebase AI Logic for a recipe and writes it as this user's own. Resolves once
+   * Firestore has acknowledged the write, so the caller can navigate to a list that already
+   * has it. */
+  async generateRecipe(): Promise<void> {
+    const user = this.authStore.currentUser();
+    if (!user) {
+      throw new Error('Sign in to create recipes.');
+    }
+    const recipe = await this.requestRecipe();
+    // Built field by field rather than spread from the recipe, whose createdBy is empty because
+    // the model never returns one. The create rule rejects an empty owner.
+    const draft: RecipeDraft = {
+      title: recipe.title,
+      cuisine: recipe.cuisine,
+      ingredients: recipe.ingredients,
+      instructions: recipe.instructions,
+      createdAt: serverTimestamp(),
+      createdBy: user.uid,
+      likeCount: 0,
+    };
+    await addDoc(collection(this.firestore, 'recipes').withConverter(recipeDraftConverter), draft);
+  }
+
+  /** One model call, parsed and checked. Throws if the model returned nothing usable. */
+  private async requestRecipe(): Promise<Recipe> {
+    if (!this.ai) {
+      throw new Error('Recipe generation is not configured in this build.');
+    }
+    const model = getGenerativeModel(this.ai, {
+      model: 'gemini-3.7-flash',
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: RecipeStore.RECIPE_SCHEMA,
+      },
+    });
+    const { response } = await model.generateContent(
+      'Invent one original dinner recipe. Keep ingredients and instructions concise.',
+    );
+    const body = response.text();
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(body);
+    } catch {
+      throw new Error('The generated recipe was unreadable, try again.');
+    }
+    // toRecipe coerces every field, so the checks below see the same shape a Firestore read
+    // produces rather than whatever the model returned.
+    const candidate = toRecipe('', parsed);
+    if (
+      !candidate.title ||
+      !CUISINES.includes(candidate.cuisine) ||
+      candidate.ingredients.length === 0 ||
+      candidate.instructions.length === 0
+    ) {
+      throw new Error('The generated recipe was incomplete, try again.');
+    }
+    return candidate;
   }
 
   /** Adds or removes this user's like document and moves the recipe's likeCount in one batch, so

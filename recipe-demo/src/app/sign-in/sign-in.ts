@@ -1,6 +1,6 @@
 import { ChangeDetectionStrategy, Component, inject, signal } from '@angular/core';
 import { NonNullableFormBuilder, ReactiveFormsModule, Validators } from '@angular/forms';
-import { Router } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 
 import { authErrorMessage } from '../auth-error-message';
 import { AuthStore } from '../auth-store';
@@ -15,6 +15,7 @@ import { AuthStore } from '../auth-store';
 export class SignIn {
   private readonly authStore = inject(AuthStore);
   private readonly router = inject(Router);
+  private readonly activatedRoute = inject(ActivatedRoute);
 
   protected readonly credentials = inject(NonNullableFormBuilder).group({
     email: ['', [Validators.required, Validators.email]],
@@ -44,6 +45,15 @@ export class SignIn {
       this.error.set(authErrorMessage(err));
       return;
     }
-    this.router.navigateByUrl('/').catch(err => console.error(err));
+    this.router.navigateByUrl(this.returnUrl()).catch(err => console.error(err));
+  }
+
+  /** Where the visitor was headed when the auth guard intercepted them, or `/` if the returnUrl
+   * query param is not an in-app path. */
+  private returnUrl(): string {
+    const requested = this.activatedRoute.snapshot.queryParamMap.get('returnUrl') ?? '';
+    const isInAppPath =
+      requested.startsWith('/') && !requested.startsWith('//') && !requested.startsWith('/\\');
+    return isInAppPath ? requested : '/';
   }
 }

@@ -21,6 +21,11 @@ export class AuthStore {
     inject(DestroyRef).onDestroy(unsubscribe);
   }
 
+  /** Resolves once Firebase has restored any persisted session. */
+  whenAuthResolved(): Promise<void> {
+    return this.auth.authStateReady();
+  }
+
   async signIn(email: string, password: string): Promise<void> {
     await signInWithEmailAndPassword(this.auth, email, password);
   }
