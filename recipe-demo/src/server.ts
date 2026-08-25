@@ -4,6 +4,7 @@ import {
   isMainModule,
   writeResponseToNodeResponse,
 } from '@angular/ssr/node';
+import cookieParser from 'cookie-parser';
 import express from 'express';
 import { join } from 'node:path';
 
@@ -13,20 +14,10 @@ const app = express();
 const angularApp = new AngularNodeAppEngine();
 
 /**
- * Example Express Rest API endpoints can be defined here.
- * Uncomment and define endpoints as necessary.
- *
- * Example:
- * ```ts
- * app.get('/api/{*splat}', (req, res) => {
- *   // Handle API request
- * });
- * ```
- */
-
-/**
  * Serve static files from /browser
  */
+app.use(cookieParser());
+
 app.use(
   express.static(browserDistFolder, {
     maxAge: '1y',
@@ -40,8 +31,16 @@ app.use(
  */
 app.use((req, res, next) => {
   angularApp
-    .handle(req)
-    .then(response => (response ? writeResponseToNodeResponse(response, res) : next()))
+    // The second argument comes back into the render as REQUEST_CONTEXT.
+    .handle(req, { authIdToken: req.cookies?.__session })
+    .then(response => {
+      if (!response) {
+        return next();
+      }
+      // Rendered pages can be personalized, so no shared cache may store them.
+      res.setHeader('Cache-Control', 'private');
+      return writeResponseToNodeResponse(response, res);
+    })
     .catch(next);
 });
 
