@@ -5,10 +5,11 @@ import {
   mergeApplicationConfig,
   provideAppInitializer,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { AgentPlatformBackend, getAI, provideAI } from '@angular/fire/ai';
 import { FirebaseApp, initializeApp, provideFirebaseApp } from '@angular/fire/app';
 import { initializeAppCheck, provideAppCheck, ReCaptchaV3Provider } from '@angular/fire/app-check';
-import { Auth, onIdTokenChanged, Unsubscribe } from '@angular/fire/auth';
+import { Auth, idToken, Unsubscribe } from '@angular/fire/auth';
 import { beforeAuthStateChanged } from 'firebase/auth';
 import cookies from 'js-cookie';
 
@@ -21,15 +22,12 @@ function syncSessionCookie(): void {
   const destroyRef = inject(DestroyRef);
 
   // Refresh session cookie on startup/sign-in/sign-out/background token refresh.
-  const stopSyncOnTokenChange = onIdTokenChanged(auth, async user => {
-    updateSessionCookie(await user?.getIdToken());
-  });
-  const stopSyncBeforeAuthChange = syncBeforeAuthChange(auth);
+  idToken(auth)
+    .pipe(takeUntilDestroyed(destroyRef))
+    .subscribe(token => updateSessionCookie(token ?? undefined));
 
-  destroyRef.onDestroy(() => {
-    stopSyncOnTokenChange();
-    stopSyncBeforeAuthChange();
-  });
+  const stopSyncBeforeAuthChange = syncBeforeAuthChange(auth);
+  destroyRef.onDestroy(stopSyncBeforeAuthChange);
 }
 
 /** Set or remove the session cookie. */
