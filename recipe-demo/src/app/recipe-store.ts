@@ -11,6 +11,8 @@ import {
   resource,
   signal,
 } from '@angular/core';
+import { AI } from '@angular/fire/ai';
+import { Firestore } from '@angular/fire/firestore';
 import { Schema, getGenerativeModel } from 'firebase/ai';
 import {
   Query,
@@ -30,7 +32,6 @@ import {
 } from 'firebase/firestore';
 
 import { AuthStore } from './auth-store';
-import { FIREBASE_AI, FIRESTORE } from './firebase-tokens';
 import {
   CUISINES,
   Recipe,
@@ -67,9 +68,9 @@ export class RecipeStore {
   });
 
   // Only the browser config provides this, so generation is unavailable during server rendering.
-  private readonly ai = inject(FIREBASE_AI, { optional: true });
+  private readonly ai = inject(AI, { optional: true });
 
-  private readonly firestore = inject(FIRESTORE);
+  private readonly firestore = inject(Firestore);
   private readonly authStore = inject(AuthStore);
   private readonly transferState = inject(TransferState);
   private readonly isBrowser = isPlatformBrowser(inject(PLATFORM_ID));

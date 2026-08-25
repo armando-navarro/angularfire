@@ -5,32 +5,19 @@ import {
   mergeApplicationConfig,
   provideAppInitializer,
 } from '@angular/core';
-import { FirebaseApp, initializeApp } from 'firebase/app';
-import { AgentPlatformBackend, getAI } from 'firebase/ai';
-import { initializeAppCheck, ReCaptchaV3Provider } from 'firebase/app-check';
-import { Auth, beforeAuthStateChanged, onIdTokenChanged, Unsubscribe } from 'firebase/auth';
+import { AgentPlatformBackend, getAI, provideAI } from '@angular/fire/ai';
+import { FirebaseApp, initializeApp, provideFirebaseApp } from '@angular/fire/app';
+import { initializeAppCheck, provideAppCheck, ReCaptchaV3Provider } from '@angular/fire/app-check';
+import { Auth, onIdTokenChanged, Unsubscribe } from '@angular/fire/auth';
+import { beforeAuthStateChanged } from 'firebase/auth';
 import cookies from 'js-cookie';
 
 import { appConfig } from './app.config';
 import { firebaseConfig, recaptchaSiteKey } from './firebase-config';
-import { FIREBASE_AI, FIREBASE_APP, FIREBASE_AUTH } from './firebase-tokens';
-
-function createFirebaseApp(): FirebaseApp {
-  if (location.hostname === 'localhost') {
-    // Set App Check debug flag before initializeAppCheck runs or the SDK mints no token.
-    Object.assign(globalThis, { FIREBASE_APPCHECK_DEBUG_TOKEN: true });
-  }
-  const app = initializeApp(firebaseConfig);
-  initializeAppCheck(app, {
-    provider: new ReCaptchaV3Provider(recaptchaSiteKey),
-    isTokenAutoRefreshEnabled: true,
-  });
-  return app;
-}
 
 /** Mirrors the signed-in state into a __session cookie so the server can render as this user. */
 function syncSessionCookie(): void {
-  const auth = inject(FIREBASE_AUTH);
+  const auth = inject(Auth);
   const destroyRef = inject(DestroyRef);
 
   // Refresh session cookie on startup/sign-in/sign-out/background token refresh.
@@ -66,11 +53,14 @@ function syncBeforeAuthChange(auth: Auth): Unsubscribe {
 
 const clientConfig: ApplicationConfig = {
   providers: [
-    { provide: FIREBASE_APP, useFactory: createFirebaseApp },
-    {
-      provide: FIREBASE_AI,
-      useFactory: () => getAI(inject(FIREBASE_APP), { backend: new AgentPlatformBackend() }),
-    },
+    provideFirebaseApp(() => initializeApp(firebaseConfig)),
+    provideAppCheck(() =>
+      initializeAppCheck(inject(FirebaseApp), {
+        provider: new ReCaptchaV3Provider(recaptchaSiteKey),
+        isTokenAutoRefreshEnabled: true,
+      }),
+    ),
+    provideAI(() => getAI(inject(FirebaseApp), { backend: new AgentPlatformBackend() })),
     provideAppInitializer(syncSessionCookie),
   ],
 };

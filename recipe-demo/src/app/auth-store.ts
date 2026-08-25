@@ -1,4 +1,5 @@
 import { DestroyRef, Injectable, inject, signal } from '@angular/core';
+import { Auth } from '@angular/fire/auth';
 import {
   User,
   createUserWithEmailAndPassword,
@@ -7,11 +8,9 @@ import {
   signOut,
 } from 'firebase/auth';
 
-import { FIREBASE_AUTH } from './firebase-tokens';
-
 @Injectable({ providedIn: 'root' })
 export class AuthStore {
-  private readonly auth = inject(FIREBASE_AUTH);
+  private readonly auth = inject(Auth);
   private readonly user = signal<User | null>(null);
 
   readonly currentUser = this.user.asReadonly();
