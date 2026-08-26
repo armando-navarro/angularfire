@@ -1,5 +1,6 @@
 import { isPlatformBrowser } from '@angular/common';
 import {
+  EnvironmentInjector,
   Injectable,
   PLATFORM_ID,
   ResourceStreamItem,
@@ -9,37 +10,37 @@ import {
   inject,
   makeStateKey,
   resource,
+  runInInjectionContext,
   signal,
 } from '@angular/core';
+import { rxResource } from '@angular/core/rxjs-interop';
 import { AI } from '@angular/fire/ai';
-import { Firestore } from '@angular/fire/firestore';
-import { Schema, getGenerativeModel } from 'firebase/ai';
 import {
+  Firestore,
   Query,
-  addDoc,
   collection,
-  deleteDoc,
-  doc,
+  collectionData,
   getDocs,
-  increment,
   limit,
-  onSnapshot,
   orderBy,
   query,
-  serverTimestamp,
   where,
+} from '@angular/fire/firestore';
+import { Schema, getGenerativeModel } from 'firebase/ai';
+import {
+  addDoc,
+  deleteDoc,
+  doc,
+  increment,
+  onSnapshot,
+  serverTimestamp,
   writeBatch,
 } from 'firebase/firestore';
+import { Observable, from } from 'rxjs';
+import { map, tap } from 'rxjs/operators';
 
 import { AuthStore } from './auth-store';
-import {
-  CUISINES,
-  Recipe,
-  RecipeDraft,
-  recipeConverter,
-  recipeDraftConverter,
-  toRecipe,
-} from './recipe-converter';
+import { CUISINES, Recipe, RecipeDraft, recipeDraftConverter, toRecipe } from './recipe-converter';
 
 export type RecipeSort = 'newest' | 'title';
 
@@ -71,6 +72,7 @@ export class RecipeStore {
   private readonly ai = inject(AI, { optional: true });
 
   private readonly firestore = inject(Firestore);
+  private readonly injector = inject(EnvironmentInjector);
   private readonly authStore = inject(AuthStore);
   private readonly transferState = inject(TransferState);
   private readonly isBrowser = isPlatformBrowser(inject(PLATFORM_ID));
@@ -86,9 +88,9 @@ export class RecipeStore {
 
   // Idle until a page asks for the list. The store is root provided and /create-recipe injects it
   // only to generate, so without this its server render would wait on a read it never displays.
-  private readonly recipeResource = resource({
+  private readonly recipeResource = rxResource({
     params: () => (this.listWanted() ? { cuisine: this.cuisine(), sort: this.sort() } : undefined),
-    stream: ({ params, abortSignal }) => this.readRecipes(params.cuisine, params.sort, abortSignal),
+    stream: ({ params }) => this.readRecipes(params.cuisine, params.sort),
     defaultValue: [],
   });
 
@@ -256,44 +258,32 @@ export class RecipeStore {
     }
   }
 
-  /** Loads the recipes for one cuisine and sort order and hands back the signal
-   * the resource reads from. In the browser that signal keeps changing as
-   * Firestore pushes new snapshots. */
-  private async readRecipes(
-    cuisine: string,
-    sort: RecipeSort,
-    abortSignal: AbortSignal,
-  ): Promise<Signal<ResourceStreamItem<Recipe[]>>> {
-    const recipeQuery = this.buildQuery(cuisine, sort);
-    if (!this.isBrowser) {
-      // The server reads once instead of subscribing. A listener would stay
-      // open and the render would never finish.
-      const snapshot = await getDocs(recipeQuery);
-      const serverRecipes = snapshot.docs.map(recipeDoc => recipeDoc.data());
-      this.transferState.set(RecipeStore.SERVER_RENDERED_RECIPES, {
-        cuisine,
-        sort,
-        recipes: serverRecipes,
-      });
-      return signal({ value: serverRecipes });
-    }
-    // A live listener in the browser, torn down through the abort signal the
-    // resource raises when the query changes or the store is destroyed.
-    const recipes = signal<ResourceStreamItem<Recipe[]>>({ value: [] });
-    // Once this listener has responded, the server's list is stale. Without discarding it, returning
-    // to the filter the server rendered would show that old list again.
-    const unsubscribe = onSnapshot(
-      recipeQuery,
-      snapshot => {
-        this.serverRendered.set(null);
-        recipes.set({ value: snapshot.docs.map(recipeDoc => recipeDoc.data()) });
-      },
-      error => {
-        this.serverRendered.set(null);
-        recipes.set({ error });
-      },
+  /** Streams the recipes for one cuisine and sort order. */
+  private readRecipes(cuisine: string, sort: RecipeSort): Observable<Recipe[]> {
+    return runInInjectionContext(this.injector, () =>
+      this.isBrowser
+        ? // Open a live listener in the browser.
+          collectionData(this.buildQuery(cuisine, sort), { idField: 'id' }).pipe(
+            // Discard the now-stale list sent from the server once the listener has responded.
+            tap({
+              next: () => this.serverRendered.set(null),
+              error: () => this.serverRendered.set(null),
+            }),
+            map(documents => documents as Recipe[]),
+          )
+        : // Perform a single read on the server.
+          from(this.readOnceAndTransfer(cuisine, sort)),
     );
-    abortSignal.addEventListener('abort', unsubscribe);
+  }
+
+  /** Reads the list once for the server render and hands the data to TransferState, so the
+   * first browser paint shows what the server already rendered. */
+  private async readOnceAndTransfer(cuisine: string, sort: RecipeSort): Promise<Recipe[]> {
+    const snapshot = await getDocs(this.buildQuery(cuisine, sort));
+    const recipes = snapshot.docs.map(
+      recipeDoc => ({ ...recipeDoc.data(), id: recipeDoc.id }) as Recipe,
+    );
+    this.transferState.set(RecipeStore.SERVER_RENDERED_RECIPES, { cuisine, sort, recipes });
     return recipes;
   }
 
@@ -322,9 +312,9 @@ export class RecipeStore {
   }
 
   // A production list would add cursor pagination on top of this limit.
-  private buildQuery(cuisine: string, sort: RecipeSort): Query<Recipe> {
+  private buildQuery(cuisine: string, sort: RecipeSort): Query {
     const order = sort === 'newest' ? orderBy('createdAt', 'desc') : orderBy('title');
-    const recipesRef = collection(this.firestore, 'recipes').withConverter(recipeConverter);
+    const recipesRef = collection(this.firestore, 'recipes');
     return cuisine === 'all'
       ? query(recipesRef, order, limit(20))
       : query(recipesRef, where('cuisine', '==', cuisine), order, limit(20));
