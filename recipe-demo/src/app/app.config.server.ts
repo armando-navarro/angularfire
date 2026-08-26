@@ -1,17 +1,10 @@
-import {
-  ApplicationConfig,
-  REQUEST_CONTEXT,
-  inject,
-  mergeApplicationConfig,
-  provideAppInitializer,
-} from '@angular/core';
+import { ApplicationConfig, REQUEST_CONTEXT, inject, mergeApplicationConfig } from '@angular/core';
 import {
   FirebaseApp,
   initializeApp,
   initializeServerApp,
   provideFirebaseApp,
 } from '@angular/fire/app';
-import { Auth } from '@angular/fire/auth';
 import { provideServerRendering, withRoutes } from '@angular/ssr';
 
 import { appConfig } from './app.config';
@@ -22,7 +15,7 @@ function createFirebaseApp(): FirebaseApp {
   // Pass REQUEST_CONTEXT's authIdToken to render personalized signed-in content.
   const requestContext = inject(REQUEST_CONTEXT, { optional: true });
 
-  // Anonymous requests need a server app only to carry an App Check token (not needed in our app).
+  // Anonymous requests need a server app only to carry an App Check token (not needed in this app).
   if (!hasAuthIdToken(requestContext)) {
     return initializeApp(firebaseConfig);
   }
@@ -45,8 +38,6 @@ const serverConfig: ApplicationConfig = {
   providers: [
     provideServerRendering(withRoutes(serverRoutes)),
     provideFirebaseApp(createFirebaseApp),
-    // Wait for auth state to settle before rendering.
-    provideAppInitializer(() => inject(Auth).authStateReady()),
   ],
 };
 
