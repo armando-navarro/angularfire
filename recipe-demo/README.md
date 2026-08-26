@@ -14,7 +14,7 @@ This is not a starter template and not production-ready. Known gaps are listed u
 
 ## Deployed instance
 
-To be added when this branch's App Hosting backend is deployed.
+https://angularfire--recipe-demo-97859.us-central1.hosted.app
 
 ## Design decisions
 
