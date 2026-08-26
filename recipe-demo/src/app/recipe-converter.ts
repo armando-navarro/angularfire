@@ -38,18 +38,11 @@ export function toRecipe(id: string, data: Record<string, unknown>): Recipe {
   };
 }
 
-export const recipeConverter: FirestoreDataConverter<Recipe> = {
-  toFirestore(): DocumentData {
-    throw new Error('Recipes are written through recipeDraftConverter.');
-  },
-  fromFirestore: snapshot => toRecipe(snapshot.id, snapshot.data()),
-};
-
 export const recipeDraftConverter: FirestoreDataConverter<RecipeDraft> = {
   toFirestore(draft: WithFieldValue<RecipeDraft>): DocumentData {
     return { ...draft };
   },
   fromFirestore(): RecipeDraft {
-    throw new Error('Recipes are read through recipeConverter.');
+    throw new Error('Recipes are read as untyped documents.');
   },
 };

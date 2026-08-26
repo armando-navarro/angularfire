@@ -1,40 +1,33 @@
-import { DestroyRef, Injectable, inject, signal } from '@angular/core';
+import { EnvironmentInjector, Injectable, inject, runInInjectionContext } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import {
-  User,
+  Auth,
+  authState,
   createUserWithEmailAndPassword,
-  onAuthStateChanged,
   signInWithEmailAndPassword,
   signOut,
-} from 'firebase/auth';
-
-import { FIREBASE_AUTH } from './firebase-tokens';
+} from '@angular/fire/auth';
 
 @Injectable({ providedIn: 'root' })
 export class AuthStore {
-  private readonly auth = inject(FIREBASE_AUTH);
-  private readonly user = signal<User | null>(null);
+  private readonly auth = inject(Auth);
+  private readonly injector = inject(EnvironmentInjector);
 
-  readonly currentUser = this.user.asReadonly();
-
-  constructor() {
-    const unsubscribe = onAuthStateChanged(this.auth, user => this.user.set(user));
-    inject(DestroyRef).onDestroy(unsubscribe);
-  }
-
-  /** Resolves once Firebase has restored any persisted session. */
-  whenAuthResolved(): Promise<void> {
-    return this.auth.authStateReady();
-  }
+  readonly currentUser = toSignal(authState(this.auth), { initialValue: null });
 
   async signIn(email: string, password: string): Promise<void> {
-    await signInWithEmailAndPassword(this.auth, email, password);
+    await runInInjectionContext(this.injector, () =>
+      signInWithEmailAndPassword(this.auth, email, password),
+    );
   }
 
   async createAccount(email: string, password: string): Promise<void> {
-    await createUserWithEmailAndPassword(this.auth, email, password);
+    await runInInjectionContext(this.injector, () =>
+      createUserWithEmailAndPassword(this.auth, email, password),
+    );
   }
 
   signOut(): Promise<void> {
-    return signOut(this.auth);
+    return runInInjectionContext(this.injector, () => signOut(this.auth));
   }
 }

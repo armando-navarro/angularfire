@@ -4,7 +4,7 @@
     "indexes": "firestore.indexes.json"
   },
   "apphosting": {
-    "backendId": "raw-sdk",
+    "backendId": "angularfire",
     "rootDir": "/",
     "ignore": [
       "node_modules",

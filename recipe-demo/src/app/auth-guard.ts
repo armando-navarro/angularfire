@@ -1,16 +1,16 @@
 import { inject } from '@angular/core';
+import { Auth, authState } from '@angular/fire/auth';
 import { CanActivateFn, Router } from '@angular/router';
+import { map } from 'rxjs';
 
-import { AuthStore } from './auth-store';
-
-export const authGuard: CanActivateFn = async (route, state) => {
-  // Both injections must happen before the first await, which ends the injection context.
-  const authStore = inject(AuthStore);
+export const authGuard: CanActivateFn = (route, state) => {
+  const auth = inject(Auth);
   const router = inject(Router);
 
-  await authStore.whenAuthResolved();
-  if (authStore.currentUser()) {
-    return true;
-  }
-  return router.createUrlTree(['/signin'], { queryParams: { returnUrl: state.url } });
+  // authState does not emit until Firebase has restored the session.
+  return authState(auth).pipe(
+    map(user =>
+      user ? true : router.createUrlTree(['/signin'], { queryParams: { returnUrl: state.url } }),
+    ),
+  );
 };

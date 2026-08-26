@@ -1,44 +1,39 @@
 import { isPlatformBrowser } from '@angular/common';
 import {
+  EnvironmentInjector,
   Injectable,
   PLATFORM_ID,
-  ResourceStreamItem,
-  Signal,
   TransferState,
   computed,
   inject,
   makeStateKey,
-  resource,
+  runInInjectionContext,
   signal,
 } from '@angular/core';
-import { Schema, getGenerativeModel } from 'firebase/ai';
+import { rxResource } from '@angular/core/rxjs-interop';
+import { AI, Schema, getGenerativeModel } from '@angular/fire/ai';
 import {
+  Firestore,
   Query,
   addDoc,
   collection,
+  collectionData,
   deleteDoc,
   doc,
   getDocs,
   increment,
   limit,
-  onSnapshot,
   orderBy,
   query,
   serverTimestamp,
   where,
   writeBatch,
-} from 'firebase/firestore';
+} from '@angular/fire/firestore';
+import { Observable, from, of } from 'rxjs';
+import { finalize, map, tap } from 'rxjs/operators';
 
 import { AuthStore } from './auth-store';
-import { FIREBASE_AI, FIRESTORE } from './firebase-tokens';
-import {
-  CUISINES,
-  Recipe,
-  RecipeDraft,
-  recipeConverter,
-  recipeDraftConverter,
-  toRecipe,
-} from './recipe-converter';
+import { CUISINES, Recipe, RecipeDraft, recipeDraftConverter, toRecipe } from './recipe-converter';
 
 export type RecipeSort = 'newest' | 'title';
 
@@ -67,9 +62,10 @@ export class RecipeStore {
   });
 
   // Only the browser config provides this, so generation is unavailable during server rendering.
-  private readonly ai = inject(FIREBASE_AI, { optional: true });
+  private readonly ai = inject(AI, { optional: true });
 
-  private readonly firestore = inject(FIRESTORE);
+  private readonly firestore = inject(Firestore);
+  private readonly injector = inject(EnvironmentInjector);
   private readonly authStore = inject(AuthStore);
   private readonly transferState = inject(TransferState);
   private readonly isBrowser = isPlatformBrowser(inject(PLATFORM_ID));
@@ -85,9 +81,9 @@ export class RecipeStore {
 
   // Idle until a page asks for the list. The store is root provided and /create-recipe injects it
   // only to generate, so without this its server render would wait on a read it never displays.
-  private readonly recipeResource = resource({
+  private readonly recipeResource = rxResource({
     params: () => (this.listWanted() ? { cuisine: this.cuisine(), sort: this.sort() } : undefined),
-    stream: ({ params, abortSignal }) => this.readRecipes(params.cuisine, params.sort, abortSignal),
+    stream: ({ params }) => this.readRecipes(params.cuisine, params.sort),
     defaultValue: [],
   });
 
@@ -113,10 +109,10 @@ export class RecipeStore {
   readonly error = this.recipeResource.error;
 
   // Idle the resource with undefined so no snapshot subscription occurs on the server.
-  // null instead at sign-out, so Angular aborts the previous load and unsubscribes.
-  private readonly likedResource = resource({
+  // null instead at sign-out, so Angular unsubscribes the previous listener.
+  private readonly likedResource = rxResource({
     params: () => (this.isBrowser ? (this.authStore.currentUser()?.uid ?? null) : undefined),
-    stream: ({ params: uid, abortSignal }) => this.readLikedIds(uid, abortSignal),
+    stream: ({ params: uid }) => this.readLikedIds(uid),
     defaultValue: RecipeStore.NO_LIKES,
   });
 
@@ -165,7 +161,9 @@ export class RecipeStore {
       createdBy: user.uid,
       likeCount: 0,
     };
-    await addDoc(collection(this.firestore, 'recipes').withConverter(recipeDraftConverter), draft);
+    await runInInjectionContext(this.injector, () =>
+      addDoc(collection(this.firestore, 'recipes').withConverter(recipeDraftConverter), draft),
+    );
   }
 
   /** One model call, parsed and checked. Throws if the model returned nothing usable. */
@@ -173,13 +171,16 @@ export class RecipeStore {
     if (!this.ai) {
       throw new Error('Recipe generation is not configured in this build.');
     }
-    const model = getGenerativeModel(this.ai, {
-      model: 'gemini-3.7-flash',
-      generationConfig: {
-        responseMimeType: 'application/json',
-        responseSchema: RecipeStore.RECIPE_SCHEMA,
-      },
-    });
+    const ai = this.ai;
+    const model = runInInjectionContext(this.injector, () =>
+      getGenerativeModel(ai, {
+        model: 'gemini-3.7-flash',
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: RecipeStore.RECIPE_SCHEMA,
+        },
+      }),
+    );
     const { response } = await model.generateContent(
       'Invent one original dinner recipe. Keep ingredients and instructions concise.',
     );
@@ -217,19 +218,22 @@ export class RecipeStore {
     this.likeErrorRecipe.set(null);
     this.deleteErrorRecipe.set(null);
     try {
-      const likeRef = doc(this.firestore, `users/${user.uid}/likes/${recipe.id}`);
-      const recipeRef = doc(this.firestore, `recipes/${recipe.id}`);
-      const batch = writeBatch(this.firestore);
-      if (this.likedIds().has(recipe.id)) {
-        batch.delete(likeRef);
-        if (recipe.likeCount > 0) {
-          batch.update(recipeRef, { likeCount: increment(-1) });
+      const likeBatch = runInInjectionContext(this.injector, () => {
+        const likeRef = doc(this.firestore, `users/${user.uid}/likes/${recipe.id}`);
+        const recipeRef = doc(this.firestore, `recipes/${recipe.id}`);
+        const batch = writeBatch(this.firestore);
+        if (this.likedIds().has(recipe.id)) {
+          batch.delete(likeRef);
+          if (recipe.likeCount > 0) {
+            batch.update(recipeRef, { likeCount: increment(-1) });
+          }
+        } else {
+          batch.set(likeRef, {});
+          batch.update(recipeRef, { likeCount: increment(1) });
         }
-      } else {
-        batch.set(likeRef, {});
-        batch.update(recipeRef, { likeCount: increment(1) });
-      }
-      await batch.commit();
+        return batch;
+      });
+      await likeBatch.commit();
     } catch (error) {
       console.error(error);
       this.likeErrorRecipe.set(recipe.title);
@@ -248,82 +252,62 @@ export class RecipeStore {
     this.deleteErrorRecipe.set(null);
     this.likeErrorRecipe.set(null);
     try {
-      await deleteDoc(doc(this.firestore, `recipes/${recipe.id}`));
+      await runInInjectionContext(this.injector, () =>
+        deleteDoc(doc(this.firestore, `recipes/${recipe.id}`)),
+      );
     } catch (error) {
       console.error(error);
       this.deleteErrorRecipe.set(recipe.title);
     }
   }
 
-  /** Loads the recipes for one cuisine and sort order and hands back the signal
-   * the resource reads from. In the browser that signal keeps changing as
-   * Firestore pushes new snapshots. */
-  private async readRecipes(
-    cuisine: string,
-    sort: RecipeSort,
-    abortSignal: AbortSignal,
-  ): Promise<Signal<ResourceStreamItem<Recipe[]>>> {
-    const recipeQuery = this.buildQuery(cuisine, sort);
-    if (!this.isBrowser) {
-      // The server reads once instead of subscribing. A listener would stay
-      // open and the render would never finish.
-      const snapshot = await getDocs(recipeQuery);
-      const serverRecipes = snapshot.docs.map(recipeDoc => recipeDoc.data());
-      this.transferState.set(RecipeStore.SERVER_RENDERED_RECIPES, {
-        cuisine,
-        sort,
-        recipes: serverRecipes,
-      });
-      return signal({ value: serverRecipes });
-    }
-    // A live listener in the browser, torn down through the abort signal the
-    // resource raises when the query changes or the store is destroyed.
-    const recipes = signal<ResourceStreamItem<Recipe[]>>({ value: [] });
-    // Once this listener has responded, the server's list is stale. Without discarding it, returning
-    // to the filter the server rendered would show that old list again.
-    const unsubscribe = onSnapshot(
-      recipeQuery,
-      snapshot => {
-        this.serverRendered.set(null);
-        recipes.set({ value: snapshot.docs.map(recipeDoc => recipeDoc.data()) });
-      },
-      error => {
-        this.serverRendered.set(null);
-        recipes.set({ error });
-      },
+  /** Streams the recipes for one cuisine and sort order. */
+  private readRecipes(cuisine: string, sort: RecipeSort): Observable<Recipe[]> {
+    return runInInjectionContext(this.injector, () =>
+      this.isBrowser
+        ? // Open a live listener in the browser.
+          collectionData(this.buildQuery(cuisine, sort), { idField: 'id' }).pipe(
+            // Discard the now-stale list sent from the server once the listener has responded.
+            tap({
+              next: () => this.serverRendered.set(null),
+              error: () => this.serverRendered.set(null),
+            }),
+            map(documents => documents as Recipe[]),
+          )
+        : // Perform a single read on the server.
+          from(this.readOnceAndTransfer(cuisine, sort)),
     );
-    abortSignal.addEventListener('abort', unsubscribe);
+  }
+
+  /** Reads the list once for the server render and hands the data to TransferState, so the
+   * first browser paint shows what the server already rendered. */
+  private async readOnceAndTransfer(cuisine: string, sort: RecipeSort): Promise<Recipe[]> {
+    const snapshot = await getDocs(this.buildQuery(cuisine, sort));
+    const recipes = snapshot.docs.map(
+      recipeDoc => ({ ...recipeDoc.data(), id: recipeDoc.id }) as Recipe,
+    );
+    this.transferState.set(RecipeStore.SERVER_RENDERED_RECIPES, { cuisine, sort, recipes });
     return recipes;
   }
 
-  /** Streams the ids this user has liked. The abort signal unsubscribes the listener. */
-  private async readLikedIds(
-    uid: string | null,
-    abortSignal: AbortSignal,
-  ): Promise<Signal<ResourceStreamItem<ReadonlySet<string>>>> {
-    this.likesReady.set(false);
-    const likedIds = signal<ResourceStreamItem<ReadonlySet<string>>>({
-      value: RecipeStore.NO_LIKES,
-    });
+  /** Streams the ids this user has liked. */
+  private readLikedIds(uid: string | null): Observable<ReadonlySet<string>> {
     if (uid === null) {
-      return likedIds;
+      return of(RecipeStore.NO_LIKES);
     }
-    const unsubscribe = onSnapshot(
-      collection(this.firestore, `users/${uid}/likes`),
-      snapshot => {
-        likedIds.set({ value: new Set(snapshot.docs.map(likeDoc => likeDoc.id)) });
-        this.likesReady.set(true);
-      },
-      error => likedIds.set({ error }),
+    return runInInjectionContext(this.injector, () =>
+      collectionData(collection(this.firestore, `users/${uid}/likes`), { idField: 'id' }).pipe(
+        tap(() => this.likesReady.set(true)),
+        map((likes): ReadonlySet<string> => new Set(likes.map(like => String(like.id)))),
+        finalize(() => this.likesReady.set(false)),
+      ),
     );
-    abortSignal.addEventListener('abort', unsubscribe);
-    return likedIds;
   }
 
   // A production list would add cursor pagination on top of this limit.
-  private buildQuery(cuisine: string, sort: RecipeSort): Query<Recipe> {
+  private buildQuery(cuisine: string, sort: RecipeSort): Query {
     const order = sort === 'newest' ? orderBy('createdAt', 'desc') : orderBy('title');
-    const recipesRef = collection(this.firestore, 'recipes').withConverter(recipeConverter);
+    const recipesRef = collection(this.firestore, 'recipes');
     return cuisine === 'all'
       ? query(recipesRef, order, limit(20))
       : query(recipesRef, where('cuisine', '==', cuisine), order, limit(20));
