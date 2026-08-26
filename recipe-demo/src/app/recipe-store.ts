@@ -3,41 +3,34 @@ import {
   EnvironmentInjector,
   Injectable,
   PLATFORM_ID,
-  ResourceStreamItem,
-  Signal,
   TransferState,
   computed,
   inject,
   makeStateKey,
-  resource,
   runInInjectionContext,
   signal,
 } from '@angular/core';
 import { rxResource } from '@angular/core/rxjs-interop';
-import { AI } from '@angular/fire/ai';
+import { AI, Schema, getGenerativeModel } from '@angular/fire/ai';
 import {
   Firestore,
   Query,
+  addDoc,
   collection,
   collectionData,
+  deleteDoc,
+  doc,
   getDocs,
+  increment,
   limit,
   orderBy,
   query,
-  where,
-} from '@angular/fire/firestore';
-import { Schema, getGenerativeModel } from 'firebase/ai';
-import {
-  addDoc,
-  deleteDoc,
-  doc,
-  increment,
-  onSnapshot,
   serverTimestamp,
+  where,
   writeBatch,
-} from 'firebase/firestore';
-import { Observable, from } from 'rxjs';
-import { map, tap } from 'rxjs/operators';
+} from '@angular/fire/firestore';
+import { Observable, from, of } from 'rxjs';
+import { finalize, map, tap } from 'rxjs/operators';
 
 import { AuthStore } from './auth-store';
 import { CUISINES, Recipe, RecipeDraft, recipeDraftConverter, toRecipe } from './recipe-converter';
@@ -116,10 +109,10 @@ export class RecipeStore {
   readonly error = this.recipeResource.error;
 
   // Idle the resource with undefined so no snapshot subscription occurs on the server.
-  // null instead at sign-out, so Angular aborts the previous load and unsubscribes.
-  private readonly likedResource = resource({
+  // null instead at sign-out, so Angular unsubscribes the previous listener.
+  private readonly likedResource = rxResource({
     params: () => (this.isBrowser ? (this.authStore.currentUser()?.uid ?? null) : undefined),
-    stream: ({ params: uid, abortSignal }) => this.readLikedIds(uid, abortSignal),
+    stream: ({ params: uid }) => this.readLikedIds(uid),
     defaultValue: RecipeStore.NO_LIKES,
   });
 
@@ -168,7 +161,9 @@ export class RecipeStore {
       createdBy: user.uid,
       likeCount: 0,
     };
-    await addDoc(collection(this.firestore, 'recipes').withConverter(recipeDraftConverter), draft);
+    await runInInjectionContext(this.injector, () =>
+      addDoc(collection(this.firestore, 'recipes').withConverter(recipeDraftConverter), draft),
+    );
   }
 
   /** One model call, parsed and checked. Throws if the model returned nothing usable. */
@@ -176,13 +171,16 @@ export class RecipeStore {
     if (!this.ai) {
       throw new Error('Recipe generation is not configured in this build.');
     }
-    const model = getGenerativeModel(this.ai, {
-      model: 'gemini-3.7-flash',
-      generationConfig: {
-        responseMimeType: 'application/json',
-        responseSchema: RecipeStore.RECIPE_SCHEMA,
-      },
-    });
+    const ai = this.ai;
+    const model = runInInjectionContext(this.injector, () =>
+      getGenerativeModel(ai, {
+        model: 'gemini-3.7-flash',
+        generationConfig: {
+          responseMimeType: 'application/json',
+          responseSchema: RecipeStore.RECIPE_SCHEMA,
+        },
+      }),
+    );
     const { response } = await model.generateContent(
       'Invent one original dinner recipe. Keep ingredients and instructions concise.',
     );
@@ -220,19 +218,22 @@ export class RecipeStore {
     this.likeErrorRecipe.set(null);
     this.deleteErrorRecipe.set(null);
     try {
-      const likeRef = doc(this.firestore, `users/${user.uid}/likes/${recipe.id}`);
-      const recipeRef = doc(this.firestore, `recipes/${recipe.id}`);
-      const batch = writeBatch(this.firestore);
-      if (this.likedIds().has(recipe.id)) {
-        batch.delete(likeRef);
-        if (recipe.likeCount > 0) {
-          batch.update(recipeRef, { likeCount: increment(-1) });
+      const likeBatch = runInInjectionContext(this.injector, () => {
+        const likeRef = doc(this.firestore, `users/${user.uid}/likes/${recipe.id}`);
+        const recipeRef = doc(this.firestore, `recipes/${recipe.id}`);
+        const batch = writeBatch(this.firestore);
+        if (this.likedIds().has(recipe.id)) {
+          batch.delete(likeRef);
+          if (recipe.likeCount > 0) {
+            batch.update(recipeRef, { likeCount: increment(-1) });
+          }
+        } else {
+          batch.set(likeRef, {});
+          batch.update(recipeRef, { likeCount: increment(1) });
         }
-      } else {
-        batch.set(likeRef, {});
-        batch.update(recipeRef, { likeCount: increment(1) });
-      }
-      await batch.commit();
+        return batch;
+      });
+      await likeBatch.commit();
     } catch (error) {
       console.error(error);
       this.likeErrorRecipe.set(recipe.title);
@@ -251,7 +252,9 @@ export class RecipeStore {
     this.deleteErrorRecipe.set(null);
     this.likeErrorRecipe.set(null);
     try {
-      await deleteDoc(doc(this.firestore, `recipes/${recipe.id}`));
+      await runInInjectionContext(this.injector, () =>
+        deleteDoc(doc(this.firestore, `recipes/${recipe.id}`)),
+      );
     } catch (error) {
       console.error(error);
       this.deleteErrorRecipe.set(recipe.title);
@@ -287,28 +290,18 @@ export class RecipeStore {
     return recipes;
   }
 
-  /** Streams the ids this user has liked. The abort signal unsubscribes the listener. */
-  private async readLikedIds(
-    uid: string | null,
-    abortSignal: AbortSignal,
-  ): Promise<Signal<ResourceStreamItem<ReadonlySet<string>>>> {
-    this.likesReady.set(false);
-    const likedIds = signal<ResourceStreamItem<ReadonlySet<string>>>({
-      value: RecipeStore.NO_LIKES,
-    });
+  /** Streams the ids this user has liked. */
+  private readLikedIds(uid: string | null): Observable<ReadonlySet<string>> {
     if (uid === null) {
-      return likedIds;
+      return of(RecipeStore.NO_LIKES);
     }
-    const unsubscribe = onSnapshot(
-      collection(this.firestore, `users/${uid}/likes`),
-      snapshot => {
-        likedIds.set({ value: new Set(snapshot.docs.map(likeDoc => likeDoc.id)) });
-        this.likesReady.set(true);
-      },
-      error => likedIds.set({ error }),
+    return runInInjectionContext(this.injector, () =>
+      collectionData(collection(this.firestore, `users/${uid}/likes`), { idField: 'id' }).pipe(
+        tap(() => this.likesReady.set(true)),
+        map((likes): ReadonlySet<string> => new Set(likes.map(like => String(like.id)))),
+        finalize(() => this.likesReady.set(false)),
+      ),
     );
-    abortSignal.addEventListener('abort', unsubscribe);
-    return likedIds;
   }
 
   // A production list would add cursor pagination on top of this limit.
