@@ -56,10 +56,11 @@ There are two parts to Firebase Messaging, a Service Worker and the DOM API. Ang
 It may be wise to use file replacements or environments here for different environments
 
 ```
-// This sample application is using 12.4.0, make sure you are importing the same version
+/* Replace <firebase-version> with the firebase version in your package.json. The service
+ * worker and your application have to load the same version. */
 
-import { initializeApp } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-app.js";
-import { getMessaging } from "https://www.gstatic.com/firebasejs/12.4.0/firebase-messaging-sw.js";
+import { initializeApp } from "https://www.gstatic.com/firebasejs/<firebase-version>/firebase-app.js";
+import { getMessaging } from "https://www.gstatic.com/firebasejs/<firebase-version>/firebase-messaging-sw.js";
 
 const firebaseApp = initializeApp({
   apiKey: "",
