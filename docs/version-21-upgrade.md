@@ -11,7 +11,7 @@ ng update @angular/fire                 # then AngularFire 21
 
 `ng update @angular/fire` runs a migration that:
 
-- **Aligns your `firebase` dependency to `^12.4.0`.** AngularFire 21 requires Firebase JS SDK 12. If your app still requested `firebase` 11, npm would install both 11 and 12 side by side, and the two copies reject each other's objects at runtime. The migration updates the dependency and reinstalls so you end up with a single copy. Verify with `npm ls firebase`.
+- **Aligns your `firebase` dependency to `^12.18.0`.** AngularFire 21 requires Firebase JS SDK 12, at 12.18 or later. If your app requested an older `firebase`, whether that is 11 or an earlier 12, npm would install both that copy and the one AngularFire needs side by side, and the two copies reject each other's objects at runtime. The migration updates the dependency and reinstalls so you end up with a single copy. Verify with `npm ls firebase`.
 - **Rewrites Vertex AI imports to AI Logic** (see below).
 
 ## Vertex AI is now Firebase AI Logic
