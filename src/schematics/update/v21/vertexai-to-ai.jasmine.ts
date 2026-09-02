@@ -129,7 +129,7 @@ describe('rewriteVertexAIToAI', () => {
      * node_modules the way it would in a user's workspace.
      */
     const compile = (source: string): string[] => {
-      const filePath = resolve('migrated-output.ts');
+      const filePath = resolve('migrated-output.ts').replace(/\\/g, '/');
       const host = typescript.createCompilerHost(compilerOptions, true);
       const readFromDisk = host.getSourceFile.bind(host);
       const existsOnDisk = host.fileExists.bind(host);
