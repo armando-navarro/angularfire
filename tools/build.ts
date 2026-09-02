@@ -65,19 +65,11 @@ const firestoreOverrides = {
   writeBatch: { logLevel: LogLevel.VERBOSE },
 };
 
-/* Override keys firebase's type declarations may not carry, which the generator would otherwise
- * read as typos. A name lands here because a later release adds it, firebase has removed it, or
- * firebase keeps it out of its public types on purpose (browserCookiePersistence). Listing a
- * declared name is harmless: getImagenModel is here for the version this build is heading to.
- * Keyed by entry point, so a name allowed for one module is not allowed for the rest.
+/* Override keys the installed firebase's type declarations do not carry, which the generator
+ * would otherwise read as typos. Keyed by entry point, but two entry points sharing one overrides
+ * object share these names too, the way firestore and firestore/lite share firestoreOverrides.
  * At a version bump, drop a name from here but KEEP its override entry. */
-const overridesFirebaseDoesNotDeclare: Record<string, string[]> = {
-  'firebase/ai': ['getImagenModel', 'getTemplateGenerativeModel'],
-  'firebase/auth': ['browserCookiePersistence'],
-  'firebase/data-connect': ['makeMemoryCacheProvider'],
-  'firebase/firestore': ['maximum', 'minimum'],
-  'firebase/messaging': ['onRegistered', 'onUnregistered', 'unregister'],
-};
+const overridesFirebaseDoesNotDeclare: Record<string, string[]> = {};
 
 type Overrides = Record<string, OverrideOptions | null>;
 
@@ -157,8 +149,6 @@ ${exportedZoneWrappedFns}
     reexport('ai', 'firebase', 'firebase/ai', tsKeys<typeof import('firebase/ai')>(), {
       // Unwrapped via the star export: no callback, returns the model object directly.
       getTemplateGenerativeModel: null,
-      // Removed in @firebase/ai 2.15.0 (firebase 12.18.0).
-      getImagenModel: null,
     }),
     reexport('analytics', 'firebase', 'firebase/analytics', tsKeys<typeof import('firebase/analytics')>(), {
       isSupported: { blockUntilFirst: false },
