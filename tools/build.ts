@@ -66,8 +66,9 @@ const firestoreOverrides = {
 };
 
 /* Override keys the installed firebase's type declarations do not carry, which the generator
- * would otherwise read as typos. Keyed by entry point, so a name allowed for one module is not
- * allowed for the rest. At a version bump, drop a name from here but KEEP its override entry. */
+ * would otherwise read as typos. Keyed by entry point, but two entry points sharing one overrides
+ * object share these names too, the way firestore and firestore/lite share firestoreOverrides.
+ * At a version bump, drop a name from here but KEEP its override entry. */
 const overridesFirebaseDoesNotDeclare: Record<string, string[]> = {};
 
 type Overrides = Record<string, OverrideOptions | null>;
